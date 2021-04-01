@@ -1,0 +1,24 @@
+version: '3.4'
+services:
+  aerospike:
+    image: aerospike:5.5.0.3
+    hostname: aerospike
+    container_name: aerospike-server
+    ports:
+      - "4000:4000"
+    networks:
+      - backend
+    labels:
+      com.aerospike.cluster: "example"
+    command: [ "--config-file","/run/secrets/aerospike.conf"]
+    secrets:
+      - source: asconf
+        target: aerospike.conf
+
+networks:
+  backend:
+    external: true
+
+secrets:
+  asconf:
+    file: ./aerospike.conf
