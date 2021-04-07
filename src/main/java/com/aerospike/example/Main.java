@@ -3,6 +3,9 @@ package com.aerospike.example;
 import com.aerospike.client.*;
 import com.aerospike.client.Record;
 import com.aerospike.client.cluster.Node;
+import com.aerospike.client.policy.Priority;
+import com.aerospike.client.policy.ScanPolicy;
+import com.aerospike.client.policy.WritePolicy;
 import org.apache.commons.cli.*;
 
 import java.nio.charset.StandardCharsets;
@@ -12,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class Main {
 
@@ -19,10 +23,10 @@ public class Main {
     private static int DEFAULT_NUMBER_OF_OPERATIONS_PER_THREAD = 10;
 
     // See namespace configuration lru_test
-    private static int AEROSPIKE_CONF_LRU_TTL = 5;     // must match default-ttl
+    private static int AEROSPIKE_CONF_LRU_TTL = 20;     // must match default-ttl
     private static int AEROSPIKE_CONF_NSUP_PERIOD = 1; // must match nsup-period
 
-    private static int TEST_DATA_SET_SIZE = 100;
+    private static int TEST_DATA_SET_SIZE = 1000;
     private static String TEST_NAMESPACE_NAME = "lru_test";
     private static String TEST_SET_NAME = "mycache";
     private static String TEST_BIN_NAME = "bin1";
@@ -114,13 +118,14 @@ public class Main {
             System.out.print("\nCreating random records to test in LRU cache ... ");
 
             client = createAerospikeClient();
-
+            WritePolicy writePolicy = new WritePolicy();
+            writePolicy.expiration = AEROSPIKE_CONF_LRU_TTL;
             String recordIdPrefix = "record_id-" + UUID.randomUUID() + "-";
             ArrayList<CacheItemUsageTracking> cacheItemUsageTrackers = new ArrayList<>();
             for (int i = 0; i < TEST_DATA_SET_SIZE; i++) {
                 String recordId = recordIdPrefix + i;
                 Key key = new Key(TEST_NAMESPACE_NAME, TEST_SET_NAME, recordId);
-                client.put(null, key, new Bin(TEST_BIN_NAME, generateRandomString(random)));
+                client.put(writePolicy, key, new Bin(TEST_BIN_NAME, generateRandomString(random)));
 
                 // This is for internal tracking for the test
                 // - We will hand over this tracking information to threads for them to choose a random key they wish to
@@ -130,7 +135,28 @@ public class Main {
                 //   the keys that weren't used have expired due to the automatic expiry of records by Aerospike server (NSUP)
                 cacheItemUsageTrackers.add(new CacheItemUsageTracking(key, recordId));
             }
+            client.close();
+            client = createAerospikeClient();
             System.out.println("Successful");
+            // This is for internal tracking for the test
+            // - We will hand over this tracking information to threads for them to choose a random key they wish to
+            //   keep alive. Threads may be choosing the same key, which is fine since this would happen in real life.
+            // - Everytime a key is used, the key's tracking counter will increase
+            // - At the end of the test, we check if the last used keys from the cache are still in the cache. Also, if
+            //   the keys that weren't used have expired due to the automatic ex
+            // This is for internal tracking for the test
+            // - We will hand over this tracking information to threads for them to choose a random key they wish to
+            //   keep alive. Threads may be choosing the same key, which is fine since this would happen in real life.
+            // - Everytime a key is used, the key's tracking counter will increase
+            // - At the end of the test, we check if the last used keys from the cache are still in the cache. Also, if
+            //   the keys that weren't used have expired due to the automatic ex
+            // Wait for Aerospike server to sweep and clear out records
+//            Thread.sleep(1000 * (AEROSPIKE_CONF_NSUP_PERIOD * 10));
+            existingObjectCount = getObjectCountInSet(client, TEST_NAMESPACE_NAME, TEST_SET_NAME);
+            System.out.println(existingObjectCount);
+//            removeObjectFirstN(client, 5);
+
+            showObjectsHistograms(client);
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Run test
@@ -188,6 +214,7 @@ public class Main {
             }
 
             System.out.println(failed ? "Failed" : "Successful");
+            showObjectsHistograms(client);
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Verify - wait for TTL, all cache records should have disappeared
@@ -195,7 +222,7 @@ public class Main {
 
             System.out.print("Verifying: wait for just after TTL, all cache records should have disappeared ... ");
 
-            // Wait for Aeorspike server to sweep and clear out records
+            // Wait for Aerospike server to sweep and clear out records
             Thread.sleep(1000 * (AEROSPIKE_CONF_LRU_TTL + AEROSPIKE_CONF_NSUP_PERIOD * 2));
 
             failed = false;
@@ -234,6 +261,70 @@ public class Main {
         }
     }
 
+//    private static void removeObjectFirstN(AerospikeClient client, int count) {
+//
+//        ScanPolicy policy = new ScanPolicy();
+//        policy.concurrentNodes = true;
+//        policy.priority = Priority.LOW;
+//        policy.includeBinData = false;
+//        policy.failOnClusterChange = true;
+//        policy.recordsPerSecond = 10; // TODO: calc
+//
+////policy.scanPercent
+//        AtomicLong recordsRemovedCount = new AtomicLong();
+//        client.scanAll(policy, TEST_NAMESPACE_NAME, TEST_SET_NAME, new ScanCallback() {
+//            @Override
+//            public void scanCallback(Key key, Record record) throws AerospikeException {
+//                if (client.delete(null, key)) {
+//                    recordsRemovedCount.incrementAndGet();
+//                }
+//                /*
+//                 * after 10,000 records delete, return print the
+//                 * count.
+//                 */
+//                //                    if (count.get() % 10000 == 0) {
+//                //                      log.trace("Deleted {}", count.get());
+//                //                }
+//            }
+//        });
+//
+////        System.out.println("Records " + recordCount);
+//
+//    }
+
+    static class MyCallback implements ScanCallback {
+
+        public void scanCallback(Key key, Record record) {
+
+//        recordCount++;
+//        if ((recordCount % 10000) == 0) {
+//            System.out.println("Records " + recordCount);
+//        }
+
+            System.out.println("TTL " + record.expiration);
+
+        }
+    }
+
+    private static void showObjectsHistograms(AerospikeClient client) {
+        // Counting records in a set using Info
+        long objectCount = 0;
+        Node[] nodes = client.getNodes();
+        for (Node node : nodes) {
+            // Invoke an info call to each node in the cluster and sum the objectCount value
+            // The infoString will contain a result like this:
+            // objects=0:tombstones=0:memory_data_bytes=0:device_data_bytes=0:truncate_lut=0:stop-writes-count=0:disable-eviction=false;
+//                String infoString = Info.request(node, "histogram:type=object-size;namespace=" + TEST_NAMESPACE_NAME + ";set=" + TEST_SET_NAME);
+//            String infoString = Info.request(node, "histogram:type=object-size-linear;namespace=" + TEST_NAMESPACE_NAME + ";set=" + TEST_SET_NAME);
+                String infoString = Info.request(node, "hist-dump:ns=data-ns;hist=ttl");
+
+//                String infoString = Info.request(node, "histogram:namespace=" + TEST_NAMESPACE_NAME + ";set=" + TEST_SET_NAME);
+            System.out.println(infoString);
+//                String objectsString = infoString.substring(infoString.indexOf("=") + 1, infoString.indexOf(":"));
+            //              objectCount += Long.parseLong(objectsString);
+        }
+    }
+
     private static long getObjectCountInSet(AerospikeClient client, String namespaceName, String setName) {
         // Counting records in a set using Info
         long objectCount = 0;
@@ -243,9 +334,12 @@ public class Main {
             // The infoString will contain a result like this:
             // objects=0:tombstones=0:memory_data_bytes=0:device_data_bytes=0:truncate_lut=0:stop-writes-count=0:disable-eviction=false;
             String infoString = Info.request(node, "sets/" + namespaceName + "/" + setName);
+            if (infoString.equals("") || infoString.equals("ns_type=unknown")) continue;
+
             String objectsString = infoString.substring(infoString.indexOf("=") + 1, infoString.indexOf(":"));
             objectCount += Long.parseLong(objectsString);
         }
+
         return objectCount;
     }
 
@@ -278,6 +372,8 @@ public class Main {
 
                 // Connect to the cluster
                 client = createAerospikeClient();
+                WritePolicy writePolicy = new WritePolicy();
+                writePolicy.expiration = AEROSPIKE_CONF_LRU_TTL;
 
                 int n = this.operationsPerThreadCount;
                 while (n-- > 0) {
@@ -296,7 +392,7 @@ public class Main {
                             Operation.get()
                     };
 
-                    Record r = client.operate(null, testKey, fetchCachedItemOperation);
+                    Record r = client.operate(writePolicy, testKey, fetchCachedItemOperation);
                     if (r == null) {
                         throw new Exception("Record should still exist: " + this.cachedItemTracker.getId());
                     }

@@ -1,5 +1,5 @@
 # Aerospike Example: Least Recently Used (LRU) Cache
-When you have a loose collection of items, we want to remove items that have not been used.
+When you have a loose collection of items, we want to remove items that have not been used for a period of time (called TTL - Time To Live).
 
 ## Introduction
 This example demonstrates how am Aerospike namespace can be configured to act like a cache. This code demonstrates how 
@@ -17,14 +17,20 @@ namespace lru_test {
 }
 
 ```
+
 Some notes on the configuration:
 * This is an in memory configuration without replication.
 * The default-ttl is how long in seconds an item should keep alive, this should be much higher for your workloads.
 * The nsup-period is how frequent will the Aerospike eviction process will run.
 
+* Number of buckets is Bucket_Width = MAX_TTL/100
+
+https://discuss.aerospike.com/t/records-ttl-and-evictions-for-aerospike-server-version-prior-to-3-8/737
+
 Enhancements (see Aerospike documentation):
-* You can do fine-grained control of TTLs at the record level - you can have different caches per set per record (using WritePolicy)
-* You can set up a distributed cache by adding more nodes and increasing the replication-factor to 2
+* You can do fine-grained control of TTLs at the record level - you can have different caches per set per record (using WritePolicy).
+* You can set up a distributed cache by adding more nodes and increasing the replication-factor to 2.
+* In production records of particular TTL are placed in buckets (default is 10,000) so configure upto 10,000,000 for better fine grain control: see https://discuss.aerospike.com/t/eviction-mechanisms-in-aerospike/2854
 
 Further information is available at https://www.aerospike.com/docs/operations/configure/namespace/retention/index.html
 
@@ -84,6 +90,5 @@ Max hyper threads is number of CPUs x 2
 DESTRUCTIVE: WARNING! Removes all docker images and instances
 You would use this if you want to experiment with different aerospike.conf and versions of Aerospike servers:
 ```
-$docker kill $(docker ps -q) -f; docker rm $(docker ps -a -q) -f
 $docker kill $(docker ps -q) -f; docker rm $(docker ps -a -q) -f ; docker rmi $(docker images -q -a) -f
 ```
