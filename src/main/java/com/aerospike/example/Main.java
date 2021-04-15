@@ -3,8 +3,6 @@ package com.aerospike.example;
 import com.aerospike.client.*;
 import com.aerospike.client.Record;
 import com.aerospike.client.cluster.Node;
-import com.aerospike.client.policy.Priority;
-import com.aerospike.client.policy.ScanPolicy;
 import com.aerospike.client.policy.WritePolicy;
 import org.apache.commons.cli.*;
 
@@ -14,8 +12,8 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class Main {
 
@@ -136,7 +134,7 @@ public class Main {
                 cacheItemUsageTrackers.add(new CacheItemUsageTracking(key, recordId));
             }
             client.close();
-            client = createAerospikeClient();
+
             System.out.println("Successful");
             // This is for internal tracking for the test
             // - We will hand over this tracking information to threads for them to choose a random key they wish to
@@ -152,11 +150,10 @@ public class Main {
             //   the keys that weren't used have expired due to the automatic ex
             // Wait for Aerospike server to sweep and clear out records
 //            Thread.sleep(1000 * (AEROSPIKE_CONF_NSUP_PERIOD * 10));
+            client = createAerospikeClient();
             existingObjectCount = getObjectCountInSet(client, TEST_NAMESPACE_NAME, TEST_SET_NAME);
             System.out.println(existingObjectCount);
 //            removeObjectFirstN(client, 5);
-
-            showObjectsHistograms(client);
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Run test
@@ -164,7 +161,19 @@ public class Main {
 
             System.out.println("\nRunning tests: threads=" + threadCount + ", operations per thread=" + operationsPerThreadCount + ", ttl=" + lruTTL_sec + " seconds ... ");
 
+            ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+            // Monitor number of objects in the various histogram TTL buckets
+            ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+            AtomicBoolean cancelMonitor = new AtomicBoolean();
+            new Thread(new ManageMaxObjectsInLRUCacheWorker(cancelMonitor, createAerospikeClient(), TEST_NAMESPACE_NAME, TEST_SET_NAME)).start();
+
+            ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+            // Launch object creators with varying random TTL
+            ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
             ExecutorService es = Executors.newCachedThreadPool();
+
             int n = threadCount;
             while (n-- > 0) {
                 // Randomly select a key for each worker thread to keep alive
@@ -172,12 +181,14 @@ public class Main {
                 System.out.println("Keeping alive record: " + randomCachedItemTracker.getId());
                 es.execute(new BenchmarkWorker(randomCachedItemTracker, operationsPerThreadCount, lruTTL_sec, random));
             }
-            es.shutdown();
+//            es.shutdown();
             try {
                 boolean finished = es.awaitTermination(1, TimeUnit.MINUTES);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
+
+            cancelMonitor.set(true);
             System.out.println("\n");
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -214,7 +225,7 @@ public class Main {
             }
 
             System.out.println(failed ? "Failed" : "Successful");
-            showObjectsHistograms(client);
+//            showObjectsHistograms(client);
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Verify - wait for TTL, all cache records should have disappeared
@@ -306,24 +317,6 @@ public class Main {
         }
     }
 
-    private static void showObjectsHistograms(AerospikeClient client) {
-        // Counting records in a set using Info
-        long objectCount = 0;
-        Node[] nodes = client.getNodes();
-        for (Node node : nodes) {
-            // Invoke an info call to each node in the cluster and sum the objectCount value
-            // The infoString will contain a result like this:
-            // objects=0:tombstones=0:memory_data_bytes=0:device_data_bytes=0:truncate_lut=0:stop-writes-count=0:disable-eviction=false;
-//                String infoString = Info.request(node, "histogram:type=object-size;namespace=" + TEST_NAMESPACE_NAME + ";set=" + TEST_SET_NAME);
-//            String infoString = Info.request(node, "histogram:type=object-size-linear;namespace=" + TEST_NAMESPACE_NAME + ";set=" + TEST_SET_NAME);
-                String infoString = Info.request(node, "hist-dump:ns=data-ns;hist=ttl");
-
-//                String infoString = Info.request(node, "histogram:namespace=" + TEST_NAMESPACE_NAME + ";set=" + TEST_SET_NAME);
-            System.out.println(infoString);
-//                String objectsString = infoString.substring(infoString.indexOf("=") + 1, infoString.indexOf(":"));
-            //              objectCount += Long.parseLong(objectsString);
-        }
-    }
 
     private static long getObjectCountInSet(AerospikeClient client, String namespaceName, String setName) {
         // Counting records in a set using Info
@@ -408,10 +401,11 @@ public class Main {
                 }
             } catch (Exception e) {
                 e.printStackTrace();
-            }
+            } finally {
 
-            if (client != null) {
-                client.close();
+                if (client != null) {
+                    client.close();
+                }
             }
         }
     }

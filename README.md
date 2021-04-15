@@ -11,6 +11,8 @@ pulling different items off the cache.
 namespace lru_test {
     default-ttl 5
     nsup-period 1
+    nsup-hist-period 1
+    evict-hist-buckets 1000
 
 	replication-factor 1
 	memory-size 1G
@@ -20,8 +22,10 @@ namespace lru_test {
 
 Some notes on the configuration:
 * This is an in memory configuration without replication.
-* The default-ttl is how long in seconds an item should keep alive, this should be much higher for your workloads.
-* The nsup-period is how frequent will the Aerospike eviction process will run.
+* The default-ttl is how long in seconds an item should keep alive, this should be much higher for your workloads (defalut disabled): https://www.aerospike.com/docs/reference/configuration/#default-ttl
+* The nsup-period is how frequent will the Aerospike eviction process will run (default disabled): https://www.aerospike.com/docs/reference/configuration/#nsup-period
+* The nsup-hist-period is how frequest will the histograms will be update (default 3600): https://www.aerospike.com/docs/reference/configuration/#nsup-hist-period
+* hist-width
 
 * Number of buckets is Bucket_Width = MAX_TTL/100
 
