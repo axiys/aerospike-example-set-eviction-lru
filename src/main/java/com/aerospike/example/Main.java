@@ -21,7 +21,7 @@ public class Main {
     private static int DEFAULT_NUMBER_OF_OPERATIONS_PER_THREAD = 10;
 
     // See namespace configuration lru_test
-    private static int AEROSPIKE_CONF_LRU_TTL = 20;     // must match default-ttl
+    private static int AEROSPIKE_CONF_LRU_TTL = 10;     // must match default-ttl in aerospike.conf
     private static int AEROSPIKE_CONF_NSUP_PERIOD = 1; // must match nsup-period
 
     private static int TEST_DATA_SET_SIZE = 1000;
@@ -132,6 +132,11 @@ public class Main {
                 // - At the end of the test, we check if the last used keys from the cache are still in the cache. Also, if
                 //   the keys that weren't used have expired due to the automatic expiry of records by Aerospike server (NSUP)
                 cacheItemUsageTrackers.add(new CacheItemUsageTracking(key, recordId));
+
+                // Launch at random times
+                int randomTime_sec = random.nextInt(lruTTL_sec );
+                Thread.sleep(randomTime_sec);
+                //System.out.print(".");
             }
             client.close();
 
@@ -164,9 +169,9 @@ public class Main {
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Monitor number of objects in the various histogram TTL buckets
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+            long goal_total_max_objects = 800;
             AtomicBoolean cancelMonitor = new AtomicBoolean();
-            new Thread(new ManageMaxObjectsInLRUCacheWorker(cancelMonitor, createAerospikeClient(), TEST_NAMESPACE_NAME, TEST_SET_NAME)).start();
+            new Thread(new ManageMaxObjectsInLRUCachePolicy(cancelMonitor, createAerospikeClient(), TEST_NAMESPACE_NAME, TEST_SET_NAME, AEROSPIKE_CONF_LRU_TTL, goal_total_max_objects)).start();
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Launch object creators with varying random TTL
@@ -178,7 +183,6 @@ public class Main {
             while (n-- > 0) {
                 // Randomly select a key for each worker thread to keep alive
                 CacheItemUsageTracking randomCachedItemTracker = cacheItemUsageTrackers.get(random.nextInt(cacheItemUsageTrackers.size()));
-                System.out.println("Keeping alive record: " + randomCachedItemTracker.getId());
                 es.execute(new BenchmarkWorker(randomCachedItemTracker, operationsPerThreadCount, lruTTL_sec, random));
             }
 //            es.shutdown();
@@ -272,51 +276,6 @@ public class Main {
         }
     }
 
-//    private static void removeObjectFirstN(AerospikeClient client, int count) {
-//
-//        ScanPolicy policy = new ScanPolicy();
-//        policy.concurrentNodes = true;
-//        policy.priority = Priority.LOW;
-//        policy.includeBinData = false;
-//        policy.failOnClusterChange = true;
-//        policy.recordsPerSecond = 10; // TODO: calc
-//
-////policy.scanPercent
-//        AtomicLong recordsRemovedCount = new AtomicLong();
-//        client.scanAll(policy, TEST_NAMESPACE_NAME, TEST_SET_NAME, new ScanCallback() {
-//            @Override
-//            public void scanCallback(Key key, Record record) throws AerospikeException {
-//                if (client.delete(null, key)) {
-//                    recordsRemovedCount.incrementAndGet();
-//                }
-//                /*
-//                 * after 10,000 records delete, return print the
-//                 * count.
-//                 */
-//                //                    if (count.get() % 10000 == 0) {
-//                //                      log.trace("Deleted {}", count.get());
-//                //                }
-//            }
-//        });
-//
-////        System.out.println("Records " + recordCount);
-//
-//    }
-
-    static class MyCallback implements ScanCallback {
-
-        public void scanCallback(Key key, Record record) {
-
-//        recordCount++;
-//        if ((recordCount % 10000) == 0) {
-//            System.out.println("Records " + recordCount);
-//        }
-
-            System.out.println("TTL " + record.expiration);
-
-        }
-    }
-
 
     private static long getObjectCountInSet(AerospikeClient client, String namespaceName, String setName) {
         // Counting records in a set using Info
@@ -390,6 +349,8 @@ public class Main {
                         throw new Exception("Record should still exist: " + this.cachedItemTracker.getId());
                     }
 
+                    //System.out.println("DEBUG: Kept record alive key=" + testKey + ", TTL=" + r.getTimeToLive());
+
                     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
                     // This is for testing only
@@ -397,7 +358,7 @@ public class Main {
 
                     // Show use being busy
                     if (n % 20 == 0) System.out.println(".");
-                    System.out.print(".");
+                    //System.out.print(".");
                 }
             } catch (Exception e) {
                 e.printStackTrace();
