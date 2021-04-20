@@ -24,9 +24,11 @@ public class Main {
     private static int AEROSPIKE_CONF_LRU_TTL = 10;     // must match default-ttl in aerospike.conf
     private static int AEROSPIKE_CONF_NSUP_PERIOD = 1; // must match nsup-period
 
-    private static int TEST_GOAL_MAX_DATA_SET_SIZE = 800;
     private static int TEST_INITIAL_DATA_SET_SIZE = 1000;
     private static int TEST_GROWTH_DATA_SET_SIZE = 200;
+
+    private static int POLICY_CONFIG_MAX_OBJECTS_GOAL = 800;
+    private static int POLICY_CONFIG_MAX_OBJECTS_GOAL_CHECK_FREQUENCY = 500;
 
     private static String TEST_NAMESPACE_NAME = "lru_test";
     private static String TEST_SET_NAME = "mycache";
@@ -100,14 +102,12 @@ public class Main {
 
             int threadCount = cmd != null ? Integer.parseInt(cmd.getOptionValue("threads", String.valueOf(DEFAULT_NUMBER_OF_THREADS))) : DEFAULT_NUMBER_OF_THREADS;
             int operationsPerThreadCount = cmd != null ? Integer.parseInt(cmd.getOptionValue("operations", String.valueOf(DEFAULT_NUMBER_OF_OPERATIONS_PER_THREAD))) : DEFAULT_NUMBER_OF_OPERATIONS_PER_THREAD;
-            //   int lruTTL_sec = AEROSPIKE_CONF_LRU_TTL;
+
+            client = createAerospikeClient();
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Verify: empty cache to start off with
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-            client = createAerospikeClient();
-
             long existingObjectCount = getObjectCountInSet(client, TEST_NAMESPACE_NAME, TEST_SET_NAME);
             if (existingObjectCount > 0) {
                 throw new Exception("Cache should be empty before starting. Either wait until existing items have expired or your have misconfigured your TTL and NSUP for the namespace or record");
@@ -116,67 +116,21 @@ public class Main {
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Generate the set of keys that will be used for LRU cache testing
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+            System.out.println("\nCreating random records to test in LRU cache ... ");
 
-            System.out.print("\nCreating random records to test in LRU cache ... ");
-
-            // client = createAerospikeClient();
-
-            //Load up and initially large volume of objects
-             RandomObjectGeneratorPolicy.RandomObjectGenerator.generate(client, TEST_NAMESPACE_NAME, TEST_SET_NAME, TEST_BIN_NAME, AEROSPIKE_CONF_LRU_TTL, TEST_INITIAL_DATA_SET_SIZE);
-//            WritePolicy writePolicy = new WritePolicy();
-//            writePolicy.expiration = AEROSPIKE_CONF_LRU_TTL;
-//            String recordIdPrefix = "record_id-" + UUID.randomUUID() + "-";
-//            for (int i = 0; i < TEST_DATA_SET_SIZE; i++) {
-//                String recordId = recordIdPrefix + i;
-//                Key key = new Key(TEST_NAMESPACE_NAME, TEST_SET_NAME, recordId);
-//                client.put(writePolicy, key, new Bin(TEST_BIN_NAME, generateRandomString(random)));
-//
-//                // This is for internal tracking for the test
-//                // - We will hand over this tracking information to threads for them to choose a random key they wish to
-//                //   keep alive. Threads may be choosing the same key, which is fine since this would happen in real life.
-//                // - Everytime a key is used, the key's tracking counter will increase
-//                // - At the end of the test, we check if the last used keys from the cache are still in the cache. Also, if
-//                //   the keys that weren't used have expired due to the automatic expiry of records by Aerospike server (NSUP)
-//                cacheItemUsageTrackers.add(new CacheItemUsageTracking(key, recordId));
-//
-//                // Launch at random times
-//                int randomTime_sec = random.nextInt(lruTTL_sec );
-//                Thread.sleep(randomTime_sec);
-//                //System.out.print(".");
-//            }
-//            client.close();
-
-            //   System.out.println("Successful");
-            // This is for internal tracking for the test
-            // - We will hand over this tracking information to threads for them to choose a random key they wish to
-            //   keep alive. Threads may be choosing the same key, which is fine since this would happen in real life.
-            // - Everytime a key is used, the key's tracking counter will increase
-            // - At the end of the test, we check if the last used keys from the cache are still in the cache. Also, if
-            //   the keys that weren't used have expired due to the automatic ex
-            // This is for internal tracking for the test
-            // - We will hand over this tracking information to threads for them to choose a random key they wish to
-            //   keep alive. Threads may be choosing the same key, which is fine since this would happen in real life.
-            // - Everytime a key is used, the key's tracking counter will increase
-            // - At the end of the test, we check if the last used keys from the cache are still in the cache. Also, if
-            //   the keys that weren't used have expired due to the automatic ex
-            // Wait for Aerospike server to sweep and clear out records
-//            Thread.sleep(1000 * (AEROSPIKE_CONF_NSUP_PERIOD * 10));
-            //   client = createAerospikeClient();
-//            existingObjectCount = getObjectCountInSet(client, TEST_NAMESPACE_NAME, TEST_SET_NAME);
-//            System.out.println(existingObjectCount);
-//            removeObjectFirstN(client, 5);
+            // Load up and initially large volume of objects
+            RandomObjectGeneratorPolicy.RandomObjectGenerator.generate(client, TEST_NAMESPACE_NAME, TEST_SET_NAME, TEST_BIN_NAME, AEROSPIKE_CONF_LRU_TTL, TEST_INITIAL_DATA_SET_SIZE);
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Run test
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
             System.out.println("\nRunning tests: threads=" + threadCount + ", operations per thread=" + operationsPerThreadCount + ", ttl=" + AEROSPIKE_CONF_LRU_TTL + " seconds ... ");
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Monitor number of objects in the various histogram TTL buckets
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             AtomicBoolean cancelMonitor = new AtomicBoolean();
-            new Thread(new ManageMaxObjectsInLRUCachePolicy(cancelMonitor, createAerospikeClient(), TEST_NAMESPACE_NAME, TEST_SET_NAME, AEROSPIKE_CONF_LRU_TTL, TEST_GOAL_MAX_DATA_SET_SIZE)).start();
+            new Thread(new ManageMaxObjectsInLRUCachePolicy(cancelMonitor, createAerospikeClient(), TEST_NAMESPACE_NAME, TEST_SET_NAME, AEROSPIKE_CONF_LRU_TTL, POLICY_CONFIG_MAX_OBJECTS_GOAL, POLICY_CONFIG_MAX_OBJECTS_GOAL_CHECK_FREQUENCY)).start();
 
             // Randomly add new objects so we can test max LRU object size
             AtomicBoolean cancelGenerator = new AtomicBoolean();
@@ -185,20 +139,18 @@ public class Main {
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Launch object creators with varying random TTL
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+            // This is for internal tracking for the test
+            // - We will hand over this tracking information to threads for them to choose a random key they wish to
+            //   keep alive. Threads may be choosing the same key, which is fine since this would happen in real life.
+            // - Everytime a key is used, the key's tracking counter will increase
+            // - At the end of the test, we check if the last used keys from the cache are still in the cache. Also, if
+            //   the keys that weren't used have expired due to the automatic expiry of records by Aerospike server (NSUP)
             ArrayList<CacheItemUsageTracking> cacheItemUsageTrackers = new ArrayList<>();
 
             ExecutorService es = Executors.newCachedThreadPool();
 
             int n = threadCount;
             while (n-- > 0) {
-
-                // This is for internal tracking for the test
-                // - We will hand over this tracking information to threads for them to choose a random key they wish to
-                //   keep alive. Threads may be choosing the same key, which is fine since this would happen in real life.
-                // - Everytime a key is used, the key's tracking counter will increase
-                // - At the end of the test, we check if the last used keys from the cache are still in the cache. Also, if
-                //   the keys that weren't used have expired due to the automatic expiry of records by Aerospike server (NSUP)
-
 
                 // Randomly generate a record for each worker thread to keep alive
                 List<String> generatedRecordIds = RandomObjectGeneratorPolicy.RandomObjectGenerator.generate(client, TEST_NAMESPACE_NAME, TEST_SET_NAME, TEST_BIN_NAME, AEROSPIKE_CONF_LRU_TTL, 1);
@@ -207,7 +159,7 @@ public class Main {
                 CacheItemUsageTracking randomCachedItemTracker = new CacheItemUsageTracking(key, recordId);
                 cacheItemUsageTrackers.add(new CacheItemUsageTracking(key, recordId));
 
-               es.execute(new BenchmarkWorker(randomCachedItemTracker, operationsPerThreadCount, AEROSPIKE_CONF_LRU_TTL, random));
+                es.execute(new BenchmarkWorker(randomCachedItemTracker, operationsPerThreadCount, AEROSPIKE_CONF_LRU_TTL, random));
             }
 
             es.shutdown();
@@ -226,7 +178,6 @@ public class Main {
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Verify - some cache items still around before their TTL
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
             System.out.print("\nVerifying: some cache items are still around before their TTL ... ");
 
             long finalObjectCount = getObjectCountInSet(client, TEST_NAMESPACE_NAME, TEST_SET_NAME);
@@ -238,7 +189,6 @@ public class Main {
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Verify - check that the records we expect to be alive, are alive
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
             System.out.print("Verifying: expected records have been kept alive... ");
 
             boolean failed = false;
@@ -261,7 +211,6 @@ public class Main {
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Verify - wait for TTL, all cache records should have disappeared
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
             System.out.print("Verifying: wait for just after TTL, all cache records should have disappeared ... ");
 
             // Wait for Aerospike server to sweep and clear out records
@@ -285,7 +234,6 @@ public class Main {
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Verify - cache should be entirely empty
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
             System.out.print("Verifying: checking cache is now entirely empty ... ");
 
             finalObjectCount = getObjectCountInSet(client, TEST_NAMESPACE_NAME, TEST_SET_NAME);
@@ -380,7 +328,7 @@ public class Main {
 
                     // Keep the cache item alive, use time (seconds) between 0 and (TTL / 2) - just before expiry
 //                    int randomTime_sec = random.nextInt(lruTTL_sec );
-                    Thread.sleep( 1000);
+                    Thread.sleep(1000);
 
                 }
             } catch (Exception e) {

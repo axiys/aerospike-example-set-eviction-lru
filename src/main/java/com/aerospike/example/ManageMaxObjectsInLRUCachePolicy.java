@@ -19,31 +19,27 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
     private String setName;
     private int configTTL;
     private long goalTotalMaxObjects;
+    private int checkFrequency;
 
-    public ManageMaxObjectsInLRUCachePolicy(AtomicBoolean cancelled, AerospikeClient client, String namespace, String setName, int configTTL, long goalTotalMaxObjects) {
+    public ManageMaxObjectsInLRUCachePolicy(AtomicBoolean cancelled, AerospikeClient client, String namespace, String setName, int configTTL, long goalTotalMaxObjects, int checkFrequency) {
         this.client = client;
         this.cancelled = cancelled;
         this.namespace = namespace;
         this.setName = setName;
         this.configTTL = configTTL;
         this.goalTotalMaxObjects = goalTotalMaxObjects;
+        this.checkFrequency = checkFrequency;
     }
 
     public void run() {
 
         try {
-            // Run after the TTL
-            Thread.sleep(configTTL);
-
             // Periodically show number objects in the various histogram TTL buckets
             while (!cancelled.get()) {
 
                 // State Space: get the state of the namespace and set
                 ObjectsPerTTLHistogramState state = ObjectsPerTTLHistogramState.fetch(client, namespace, setName, configTTL);
 
-                Console.clear();
-//                Runtime.getRuntime().exec("clear");
-//                Runtime.getRuntime().exec("cls");
                 System.out.println("\n" + state);
 
                 // Calculate the eviction behavior's using a reward function
@@ -71,31 +67,6 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
                         //   is less than the number of buckets
                         long candidateBucketTTL = state.calculateBucketTTL(candidateBucketIndex);
 
-//                        long candidateBucketTTL = (configTTL > state.totalBuckets)
-//                                ? (state.totalBuckets - candidateBucketIndex) * state.durationPerBucket
-//                                : (configTTL - candidateBucketIndex) * state.durationPerBucket;
-//                        long candidateBucketTTL = (state.totalBuckets - candidateBucketIndex)* state.durationPerBucket;
-
-//                                (long) ((state.totalBuckets - candidateBucketIndex) // Oldest buckets have lower index
-//                                        * ((double) configTTL / state.totalBuckets) * state.durationPerBucket);
-//                        long candidateBucketTTL =
-//                                (long) ((state.totalBuckets - candidateBucketIndex) // Oldest buckets have lower index
-//                                        * ((double) configTTL / state.totalBuckets) * state.durationPerBucket);
-
-                        // How many objects do we need to remove to satisfy our goal for this bucket only?
-//                        int candidateBucketPercentageToRemoveInBucket = 0;
-//
-//                        // Is there an insufficient number of objects in this bucket to satisfy the goal?
-//                        if (subgoal_objects_to_remove > goal_total_max_objects) {
-//                            // Not enough objects to satisfy the goal. So for now remove the objects in this bucket,
-//                            // we will be running this policy again
-//                            candidateBucketPercentageToRemoveInBucket = 100;
-//                        } else {
-//                            // We don't want to remove all the items in this bucket, just a percentage
-//                            candidateBucketPercentageToRemoveInBucket = Math.round((subgoal_objects_to_remove * 100) / candidateBucketCount);
-//                        }
-//                        System.out.println("DEBUG: state.totalObjects=" + state.totalObjects + ", goal_total_max_objects=" + goal_total_max_objects + ", subgoal_objects_to_remove=" + subgoal_objects_to_remove + ", candidateBucketIndex=" + candidateBucketIndex + ", candidateBucketCount=" + candidateBucketCount + ", ttlLowWatermark=" + candidateBucketTTL + ", candidateBucketRemovePercentage=" + candidateBucketPercentageToRemoveInBucket);
-
                         // How many to remove this bucket?
                         // - Consider that we may not have enough, we will get more on next iteration
                         long candidateBucketRemoveCount = Math.min(subGoalObjectsToRemove, candidateBucketCount);
@@ -105,7 +76,8 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
                     }
                 }
 
-                Thread.sleep(1000);
+                // Run frequently
+                Thread.sleep(checkFrequency);
             }
 
         } catch (Exception e) {
@@ -139,7 +111,6 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
             policy.includeBinData = false;
             policy.failOnClusterChange = true;
             policy.scanPercent = 100;
-//            policy.scanPercent =10;// candidateBucketRemovePercentage;
 
             AtomicLong objects_removed_count = new AtomicLong(0);
 
@@ -176,11 +147,6 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     static class ManageMaxObjectsInLRUCacheRewardFunction {
-        // Use factory methods
-        private ManageMaxObjectsInLRUCacheRewardFunction() {
-
-        }
-
         private static boolean is_satisfied(ObjectsPerTTLHistogramState state, long goal_total_max_objects) {
             return state.totalObjects < goal_total_max_objects;
         }
@@ -225,7 +191,7 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
                 if (bucketMapTTL.length() > 0) {
                     bucketMapTTL.append('|');
                 }
-                bucketMapTTL.append(String.format("%3d",  bucketTTL));
+                bucketMapTTL.append(String.format("%3d", bucketTTL));
 
                 if (bucketMapHeader.length() > 0) {
                     bucketMapHeader.append('|');
