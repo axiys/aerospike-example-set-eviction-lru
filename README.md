@@ -19,8 +19,8 @@ namespace lru_test {
     nsup-hist-period 1
     evict-hist-buckets 200000
 
-	replication-factor 1
-	memory-size 1G
+    replication-factor 1
+    memory-size 1G
 }
 
 ```
@@ -30,9 +30,7 @@ Some notes on the configuration:
 * The default-ttl is how long in seconds an item should keep alive, this should be much higher for your workloads (defalut disabled): https://www.aerospike.com/docs/reference/configuration/#default-ttl
 * The nsup-period is how frequent will the Aerospike eviction process will run (default disabled): https://www.aerospike.com/docs/reference/configuration/#nsup-period
 * The nsup-hist-period is how frequest will the histograms will be update (default 3600): https://www.aerospike.com/docs/reference/configuration/#nsup-hist-period
-* hist-width
-
-* Number of buckets is Bucket_Width = MAX_TTL/100
+* The evict-hist-buckets controls the number of eviction histogram buckets - provides the a level of granuality 
 
 https://discuss.aerospike.com/t/records-ttl-and-evictions-for-aerospike-server-version-prior-to-3-8/737
 
