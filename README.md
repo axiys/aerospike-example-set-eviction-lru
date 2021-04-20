@@ -106,7 +106,10 @@ You would use this if you want to experiment with different aerospike.conf and v
 $docker kill $(docker ps -q) -f; docker rm $(docker ps -a -q) -f ; docker rmi $(docker images -q -a) -f
 ```
 
-## Run
+## Run Example
+TTL is 10 seconds
+Max Objects 800
+
 ```
 Creating random records to test in LRU cache ... 
 >>Created 1000 new LRU cache objects
