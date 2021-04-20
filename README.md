@@ -1,7 +1,9 @@
 # Aerospike Example: Least Recently Used (LRU) Cache - TTL and Max Objects
-When you have a loose collection of items, we want to remove items that have not been used for a period of time (called TTL - Time To Live). 
+When you have a loose collection of items, we want to remove items that have not been used for a period of time (called TTL - Time To Live) and, also, make sure you don't exceed a certain maximum number of objects in the LRU cache.
 
-Also, only have a maximum number of objects in the LRU cache.
+This LRU cache example demonstrates:
+1) Items that are reused recently will be kept alive for the configurable TTL.
+2) This LRU cache example will keep a configurable maximum number objects in the cache.
 
 ## Introduction
 This example demonstrates how am Aerospike namespace can be configured to act like a cache. This code demonstrates how 
