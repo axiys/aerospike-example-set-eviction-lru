@@ -207,7 +207,7 @@ public class Main {
                 CacheItemUsageTracking randomCachedItemTracker = new CacheItemUsageTracking(key, recordId);
                 cacheItemUsageTrackers.add(new CacheItemUsageTracking(key, recordId));
 
-                es.execute(new BenchmarkWorker(randomCachedItemTracker, operationsPerThreadCount, AEROSPIKE_CONF_LRU_TTL, random));
+               es.execute(new BenchmarkWorker(randomCachedItemTracker, operationsPerThreadCount, AEROSPIKE_CONF_LRU_TTL, random));
             }
 
             es.shutdown();
@@ -219,9 +219,9 @@ public class Main {
                 e.printStackTrace();
             }
 
-            cancelMonitor.set(true);
+            // Stop generator and monitor
             cancelGenerator.set(true);
-            System.out.println("\n");
+            cancelMonitor.set(true);
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Verify - some cache items still around before their TTL
@@ -250,14 +250,13 @@ public class Main {
                 boolean recordExists = r != null;
                 boolean shouldExist = cachedItem.getHits() > 0;
 
-                if (!shouldExist && recordExists) {
-                    System.out.println("ERROR: Record should not be in cache: " + cachedItem.getRecordId() + ", test hits=" + cachedItem.getHits());
+                if (shouldExist && recordExists) {
+                    System.out.println("ERROR: Record should be in LRU cache still: " + cachedItem.getRecordId() + ", test hits=" + cachedItem.getHits());
                     failed = true;
                 }
             }
 
             System.out.println(failed ? "Failed" : "Successful");
-//            showObjectsHistograms(client);
 
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Verify - wait for TTL, all cache records should have disappeared
@@ -368,7 +367,7 @@ public class Main {
                         throw new Exception("Record should still exist: " + this.cachedItemTracker.getRecordId());
                     }
 
-                    System.out.println("DEBUG: Kept record alive key=" + testKey + ", TTL=" + r.getTimeToLive());
+                    //System.out.println("DEBUG: Kept record alive key=" + testKey + ", TTL=" + r.getTimeToLive());
 
                     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -376,7 +375,7 @@ public class Main {
                     this.cachedItemTracker.hit();
 
                     // Show use being busy
-                    if (n % 20 == 0) System.out.println(".");
+                    //if (n % 20 == 0) System.out.println(".");
                     //System.out.print(".");
 
                     // Keep the cache item alive, use time (seconds) between 0 and (TTL / 2) - just before expiry

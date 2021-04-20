@@ -44,7 +44,7 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
                 Console.clear();
 //                Runtime.getRuntime().exec("clear");
 //                Runtime.getRuntime().exec("cls");
-                System.out.println(state);
+                System.out.println("\n" + state);
 
                 // Calculate the eviction behavior's using a reward function
                 if (!ManageMaxObjectsInLRUCacheRewardFunction.is_satisfied(state, goalTotalMaxObjects)) {
@@ -99,7 +99,7 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
                         // How many to remove this bucket?
                         // - Consider that we may not have enough, we will get more on next iteration
                         long candidateBucketRemoveCount = Math.min(subGoalObjectsToRemove, candidateBucketCount);
-                        System.out.println("LRU POLICY - State:\n  Total Objects:\t\t\t\t" + state.totalObjects + "\n  Goal Max Objects:\t\t\t\t" + goalTotalMaxObjects + "\n> Objects To Remove:\t\t\t" + subGoalObjectsToRemove + "\n\n> Candidate Bucket Index:\t\t" + candidateBucketIndex +   "\n  Candidate Bucket TTL:\t\t\t" + candidateBucketTTL + "\n> Candidate Bucket Remove:\t\t" + candidateBucketRemoveCount + "/" + candidateBucketCount + "\n");
+                        System.out.println("LRU POLICY - State:\n  Total Objects:\t\t\t\t" + state.totalObjects + "\n  Goal Max Objects:\t\t\t\t" + goalTotalMaxObjects + "\n> Objects To Remove:\t\t\t" + subGoalObjectsToRemove + "\n\n> Candidate Bucket Index:\t\t" + candidateBucketIndex + "\n  Candidate Bucket TTL:\t\t\t" + candidateBucketTTL + "\n> Candidate Bucket Remove:\t\t" + candidateBucketRemoveCount + "/" + candidateBucketCount + "\n");
 
                         ForceObjectEvictionPolicy.run(client, namespace, setName, candidateBucketTTL, candidateBucketRemoveCount);
                     }
@@ -147,7 +147,7 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
                 client.scanAll(policy, namespace, setName, (key, record) -> {
 
                     int recordTTL = record.getTimeToLive();
-                    if (recordTTL >= ttlLowWatermark) {
+                    if (recordTTL <= ttlLowWatermark) {
                         if (client.delete(null, key)) {
                             //System.out.println("DEBUG: Removed record with digest=" + ByteToHex.convert(key.digest) + " - TTL=" + recordTTL);
 
@@ -162,7 +162,7 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
             } catch (AerospikeException.ScanTerminated ex) {
                 // Ignore
             } finally {
-                System.out.println(">>Removed " + objects_removed_count + "/" + subgoal_objects_to_remove + " objects\n");
+                System.out.println(">>Removed " + objects_removed_count + "/" + subgoal_objects_to_remove + " objects");
             }
         }
     }
@@ -220,12 +220,12 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
 
                 // Minimum TTL is 1 second, so ignore irrelevant bucket
                 long bucketTTL = calculateBucketTTL(bucketIndex);
-                if (bucketTTL < 0) break;
+                if (bucketTTL > configTTL) break;
 
                 if (bucketMapTTL.length() > 0) {
                     bucketMapTTL.append('|');
                 }
-                bucketMapTTL.append(String.format("%3d", bucketTTL));
+                bucketMapTTL.append(String.format("%3d",  bucketTTL));
 
                 if (bucketMapHeader.length() > 0) {
                     bucketMapHeader.append('|');
@@ -244,10 +244,7 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
         }
 
         public long calculateBucketTTL(int index) {
-            long bucketTTL = (configTTL > totalBuckets)
-                    ? (totalBuckets - index) * durationPerBucket
-                    : (configTTL - index) * durationPerBucket;
-
+            long bucketTTL = index * durationPerBucket;
             return bucketTTL;
         }
 

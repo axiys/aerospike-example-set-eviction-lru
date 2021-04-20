@@ -35,7 +35,7 @@ class RandomObjectGeneratorPolicy implements Runnable {
             while (!cancelled.get()) {
                 RandomObjectGenerator.generate(client, namespace, setName, binName, configTTL, random.nextInt(maxObjectsToCreateRandomly));
 
-                Thread.sleep(1000);
+                Thread.sleep(2000);
             }
 
         } catch (Exception e) {
@@ -92,6 +92,8 @@ class RandomObjectGeneratorPolicy implements Runnable {
                     e.printStackTrace();
                 }
             }
+
+            System.out.println(">>Created " + numberOfObjects + " new LRU cache objects");
 
             return recordIds;
         }
