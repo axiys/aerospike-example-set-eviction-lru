@@ -16,15 +16,15 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
     AerospikeClient client;
     private AtomicBoolean cancelled;
     private String namespace;
-    private String set;
-    private long configTTL;
+    private String setName;
+    private int configTTL;
     private long goalTotalMaxObjects;
 
-    public ManageMaxObjectsInLRUCachePolicy(AtomicBoolean cancelled, AerospikeClient client, String namespace, String set, long configTTL, long goalTotalMaxObjects) {
+    public ManageMaxObjectsInLRUCachePolicy(AtomicBoolean cancelled, AerospikeClient client, String namespace, String setName, int configTTL, long goalTotalMaxObjects) {
         this.client = client;
         this.cancelled = cancelled;
         this.namespace = namespace;
-        this.set = set;
+        this.setName = setName;
         this.configTTL = configTTL;
         this.goalTotalMaxObjects = goalTotalMaxObjects;
     }
@@ -32,12 +32,18 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
     public void run() {
 
         try {
+            // Run after the TTL
+            Thread.sleep(configTTL);
+
             // Periodically show number objects in the various histogram TTL buckets
             while (!cancelled.get()) {
-                Thread.sleep(1000);
 
                 // State Space: get the state of the namespace and set
-                ObjectsPerTTLHistogramState state = ObjectsPerTTLHistogramState.fetch(client, namespace, set, configTTL);
+                ObjectsPerTTLHistogramState state = ObjectsPerTTLHistogramState.fetch(client, namespace, setName, configTTL);
+
+                Console.clear();
+//                Runtime.getRuntime().exec("clear");
+//                Runtime.getRuntime().exec("cls");
                 System.out.println(state);
 
                 // Calculate the eviction behavior's using a reward function
@@ -93,15 +99,17 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
                         // How many to remove this bucket?
                         // - Consider that we may not have enough, we will get more on next iteration
                         long candidateBucketRemoveCount = Math.min(subGoalObjectsToRemove, candidateBucketCount);
-                        System.out.println("DEBUG: state.totalObjects=" + state.totalObjects + ", goalTotalMaxObjects=" + goalTotalMaxObjects + ", subGoalObjectsToRemove=" + subGoalObjectsToRemove + ", candidateBucketIndex=" + candidateBucketIndex + ", candidateBucketCount=" + candidateBucketCount + ", candidateBucketTTL=" + candidateBucketTTL + ", candidateBucketRemoveCount=" + candidateBucketRemoveCount);
+                        System.out.println("LRU POLICY - State:\n  Total Objects:\t\t\t\t" + state.totalObjects + "\n  Goal Max Objects:\t\t\t\t" + goalTotalMaxObjects + "\n> Objects To Remove:\t\t\t" + subGoalObjectsToRemove + "\n\n> Candidate Bucket Index:\t\t" + candidateBucketIndex +   "\n  Candidate Bucket TTL:\t\t\t" + candidateBucketTTL + "\n> Candidate Bucket Remove:\t\t" + candidateBucketRemoveCount + "/" + candidateBucketCount + "\n");
 
-                        ForceObjectEvictionPolicy.run(client, namespace, set, candidateBucketTTL, candidateBucketRemoveCount);
-                        System.out.println("DEBUG: Done");
+                        ForceObjectEvictionPolicy.run(client, namespace, setName, candidateBucketTTL, candidateBucketRemoveCount);
                     }
                 }
+
+                Thread.sleep(1000);
             }
 
         } catch (Exception e) {
+            // TODO:auto recovery after error
             e.printStackTrace();
 
         } finally {
@@ -124,31 +132,38 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
         private ForceObjectEvictionPolicy() {
         }
 
-        private static void run(AerospikeClient client, String namespace, String set, long ttlLowWatermark, long subgoal_objects_to_remove) {
+        private static void run(AerospikeClient client, String namespace, String setName, long ttlLowWatermark, long subgoal_objects_to_remove) {
             ScanPolicy policy = new ScanPolicy();
             policy.concurrentNodes = true;
-            policy.priority = Priority.LOW;
+            policy.priority = Priority.HIGH;
             policy.includeBinData = false;
             policy.failOnClusterChange = true;
             policy.scanPercent = 100;
 //            policy.scanPercent =10;// candidateBucketRemovePercentage;
 
-            AtomicLong objects_removed_count = new AtomicLong(subgoal_objects_to_remove);
+            AtomicLong objects_removed_count = new AtomicLong(0);
 
-            client.scanAll(policy, namespace, set, (key, record) -> {
+            try {
+                client.scanAll(policy, namespace, setName, (key, record) -> {
 
-                // Finished?
-                if (objects_removed_count.decrementAndGet() <= 0) {
-                    throw new AerospikeException.ScanTerminated();
-                }
+                    int recordTTL = record.getTimeToLive();
+                    if (recordTTL >= ttlLowWatermark) {
+                        if (client.delete(null, key)) {
+                            //System.out.println("DEBUG: Removed record with digest=" + ByteToHex.convert(key.digest) + " - TTL=" + recordTTL);
 
-                int recordTTL = record.getTimeToLive();
-                if (recordTTL >= ttlLowWatermark) {
-                    if (client.delete(null, key)) {
-                        System.out.println("DEBUG: Removed " + key + " - TTL=" + recordTTL);
+                            // Count how many we were able to delete. NOTE: scan can miss some
+                            if (objects_removed_count.incrementAndGet() >= subgoal_objects_to_remove) {
+                                throw new AerospikeException.ScanTerminated();
+                            }
+                        }
                     }
-                }
-            });
+                });
+
+            } catch (AerospikeException.ScanTerminated ex) {
+                // Ignore
+            } finally {
+                System.out.println(">>Removed " + objects_removed_count + "/" + subgoal_objects_to_remove + " objects\n");
+            }
         }
     }
 
@@ -223,10 +238,9 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
                 bucketMapCount.append(String.format("%3d", objectsPerBucket[bucketIndex]));
             }
 
+            String line = "------------------------------------------------------------------------------------------------------------------------";
             String summary = String.format("totalObjects=%d, timePerUnit=%d, durationPerBucket=%d", totalObjects, timePerUnit, durationPerBucket);
-            return  "\n\nIdx: " + bucketMapHeader + "\nTTL: " + bucketMapTTL + "\n # : " + bucketMapCount + "\n\n" + summary+ "\n";
-
-//            , Arrays.stream(objectsPerBucket).mapToObj(Long::toString).collect(Collectors.joining(","))
+            return line + "\nTTL Buckets Histogram:\nIdx: " + bucketMapHeader + "\nTTL: " + bucketMapTTL + "\n # : " + bucketMapCount + "\n" + line + "\n" + summary + "\n";
         }
 
         public long calculateBucketTTL(int index) {
@@ -249,7 +263,7 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
                 try {
                     String infoString = Info.request(node, request);
                     // Example: histogram:namespace=lru_test;set=mycache;type=ttl > units=seconds:hist-width=100:bucket-width=1:buckets=0,0,0,0,0,0,0,0,0,0,0,0,973,4,2,5,2,2,4,8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-                    System.out.println("\nDEBUG: " + request + " > " + infoString);
+                    //System.out.println("\nDEBUG: " + request + " > " + infoString);
 
                     // Cache units
                     if (state.timePerUnit == 0) {
