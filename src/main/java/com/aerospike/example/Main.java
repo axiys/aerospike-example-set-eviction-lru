@@ -30,14 +30,15 @@ public class Main {
     private static int POLICY_CONFIG_MAX_OBJECTS_GOAL = 800;
     private static int POLICY_CONFIG_MAX_OBJECTS_GOAL_CHECK_FREQUENCY = 500;
 
-    private static String TEST_NAMESPACE_NAME = "lru_test";
+//    private static String TEST_NAMESPACE_NAME = "lru_test_mem";
+    private static String TEST_NAMESPACE_NAME = "lru_test_disk";
     private static String TEST_SET_NAME = "mycache";
     private static String TEST_BIN_NAME = "bin1";
 
     private static Random random = new Random(LocalDateTime.now().getNano() * LocalDateTime.now().getSecond());
 
     private static AerospikeClient createAerospikeClient() {
-        return new AerospikeClient(null, new Host("127.0.0.1", 4000));
+        return new AerospikeClient(null, new Host("127.0.0.1", 3000));
     }
 
     private static class CacheItemUsageTracking {
@@ -118,9 +119,23 @@ public class Main {
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             System.out.println("\nCreating random records to test in LRU cache ... ");
 
-            // Load up and initially large volume of objects
-            RandomObjectGeneratorPolicy.RandomObjectGenerator.generate(client, TEST_NAMESPACE_NAME, TEST_SET_NAME, TEST_BIN_NAME, AEROSPIKE_CONF_LRU_TTL, TEST_INITIAL_DATA_SET_SIZE);
 
+            // Load up and initially large volume of objects
+            List<String> recordIds = RandomObjectGeneratorPolicy.RandomObjectGenerator.generate(client, TEST_NAMESPACE_NAME, TEST_SET_NAME, TEST_BIN_NAME, AEROSPIKE_CONF_LRU_TTL, TEST_INITIAL_DATA_SET_SIZE);
+//            Thread.sleep(1000);
+//            for (String recordId : recordIds) {
+//                Key key = new Key(TEST_NAMESPACE_NAME, TEST_SET_NAME, recordId);
+//                client.put(null, key, new Bin(TEST_BIN_NAME, RandomObjectGeneratorPolicy.RandomObjectGenerator.generateRandomString(random)));
+//                System.out.println("Updated " + recordId);
+//            }
+//            Thread.sleep(1000);
+//            for (String recordId : recordIds) {
+//                Key key = new Key(TEST_NAMESPACE_NAME, TEST_SET_NAME, recordId);
+//                client.delete(null, key);
+//                System.out.println("Deleted " + recordId);
+//            }
+//            if (1 == 1)
+//                return;
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
             // Run test
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////

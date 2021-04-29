@@ -65,8 +65,9 @@ class RandomObjectGeneratorPolicy implements Runnable {
         }
 
 
-        private static String generateRandomString(Random random) {
-            byte[] array = new byte[16];
+        public static String generateRandomString(Random random) {
+            byte[] array = new byte[1024];
+//            byte[] array = new byte[1024*1024];
             random.nextBytes(array);
             return new String(array, StandardCharsets.UTF_8);
         }

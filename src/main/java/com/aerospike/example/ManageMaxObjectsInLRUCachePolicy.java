@@ -226,7 +226,7 @@ class ManageMaxObjectsInLRUCachePolicy implements Runnable {
                 try {
                     String infoString = Info.request(node, request);
                     // Example: histogram:namespace=lru_test;set=mycache;type=ttl > units=seconds:hist-width=100:bucket-width=1:buckets=0,0,0,0,0,0,0,0,0,0,0,0,973,4,2,5,2,2,4,8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-                    //System.out.println("\nDEBUG: " + request + " > " + infoString);
+                    System.out.println("\nDEBUG: " + request + " > " + infoString);
 
                     // Cache units
                     if (state.timePerUnit == 0) {
